@@ -1,0 +1,9 @@
+**********************
+THIRD PARTY COMPONENTS
+**********************
+
+- aws-sdk-go
+  Copyright 2015 Amazon.com, Inc. or its affiliates,licensed under Apache License 2.0.
+  Copyright 2014-2015 Stripe, Inc.
+- aws-xray-sdk-go
+  Copyright 2017-2017 Amazon.com, Inc. or its affiliates,licensed under Apache License 2.0.

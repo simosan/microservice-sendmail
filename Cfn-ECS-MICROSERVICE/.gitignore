@@ -1,0 +1,5 @@
+/work
+/tmp
+/old
+.DS_Store
+*.code-workspace

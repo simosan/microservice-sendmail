@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+ ServiceName:
+   Type: String
+   Default: 'APPROVALSENDMAIL-SVC' 
+ AppName:
+   Type: String 
+   Default: 'appsendmail'
+ AppRepositoryName:
+   Type: String
+   Default: 'approvalsendmail'
+ TaskCpu:
+   Type: Number
+   Default: 512
+ TaskMemory:
+   Type: Number
+   Default: 1024
+ AppCpu:
+   Type: Number
+   Default: 512
+ AppMemory:
+   Type: Number
+   Default: 1024
+ DesiredCount:
+   Type: Number
+   Default: 1
+   # Always run two units with MultiAZ
+ ServiceDiscoveryName:
+   Type: String
+   Default: 'appsendmail'
+
+Resources:
+ # -------------------------------------
+ # Fargateですべての通信を許可するセキュリティグループ
+ # -------------------------------------
+ ServiceDiscovery:
+   Type: AWS::ServiceDiscovery::Service
+   Properties:
+     HealthCheckCustomConfig:
+       FailureThreshold: 3
+     DnsConfig:
+       DnsRecords:
+         - Type: A
+           TTL: 60
+       RoutingPolicy: WEIGHTED
+       NamespaceId: !ImportValue MKECS-SIMCLUSTER-PrivateDnsNamespace
+     Name: !Ref ServiceDiscoveryName
+
+ Service:
+   Type: AWS::ECS::Service
+   Properties:
+     Cluster: !ImportValue MKECS-SIMCLUSTER
+     DeploymentConfiguration:
+       MaximumPercent: 200
+       MinimumHealthyPercent: 100
+     DesiredCount: !Ref DesiredCount
+     LaunchType: FARGATE
+     PlatformVersion: '1.4.0'
+     NetworkConfiguration:
+       AwsvpcConfiguration:
+         AssignPublicIp: DISABLED  #privateサブネットからNATGW越しにインターネットを利用する場合はDISABLED
+         SecurityGroups:
+           - !ImportValue MKECS-SIMCLUSTER-SecurityGroup
+         Subnets: 
+           - !ImportValue MKECS-SIMCLUSTER-ProtectedSubnets1
+           - !ImportValue MKECS-SIMCLUSTER-ProtectedSubnets2
+     ServiceName: !Ref ServiceName 
+     ServiceRegistries:            #ここでECSサービスとサービスディスカバリ(CloudMap）を紐付け
+       - RegistryArn: !GetAtt ServiceDiscovery.Arn
+     TaskDefinition: !Ref ECSTaskDefinition
+
+ # -------------------------------------
+ # アプリケーションに必要なロールを定義
+ # -------------------------------------
+ EcsTaskRole:
+   Type: AWS::IAM::Role
+   Properties:
+     AssumeRolePolicyDocument:
+       Version: 2012-10-17
+       Statement:
+         - Effect: Allow
+           Principal:
+             Service:
+               - ecs-tasks.amazonaws.com
+               - events.amazonaws.com
+           Action:
+             - sts:AssumeRole
+     ManagedPolicyArns:
+       - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceEventsRole
+       - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+     RoleName: !Sub ${ServiceName}-task-role
+
+ EcsTaskRolePolicy:
+   Type: AWS::IAM::Policy
+   Properties:
+     PolicyName: !Sub ${ServiceName}-task-role-policy
+     PolicyDocument:
+       Version: 2012-10-17
+       Statement:
+         - Effect: Allow
+           Action:
+             - s3:List*
+             - s3:Get*
+             - s3:Put*
+           Resource: '*'
+     Roles:
+       - Ref: EcsTaskRole
+
+ # -------------------------------------
+ # Fargate タスク定義
+ # -------------------------------------
+ ECSTaskDefinition:
+   Type: AWS::ECS::TaskDefinition
+   Properties:
+     Family: !Ref ServiceName
+     RequiresCompatibilities:
+       - FARGATE
+     Cpu: !Ref TaskCpu
+     Memory: !Ref TaskMemory
+     NetworkMode: awsvpc
+     ExecutionRoleArn: !ImportValue EcsTaskExecutionRole
+     TaskRoleArn: !Ref EcsTaskRole
+     RuntimePlatform:
+       CpuArchitecture: ARM64
+       OperatingSystemFamily: LINUX
+     ContainerDefinitions:
+       - Name: !Ref AppName
+         Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppRepositoryName} 
+         PortMappings:
+           - ContainerPort: 53000
+             HostPort: 53000
+             Protocol: tcp
+         Environment:
+           - Name: TZ
+             Value: Asia/Tokyo
+         LogConfiguration:
+           LogDriver: awslogs
+           Options:
+             awslogs-region: !Ref 'AWS::Region'
+             awslogs-group: !ImportValue MKECS-SIMCLUSTER-LogGroup
+             awslogs-create-group: true
+             awslogs-stream-prefix: !Ref AppName
+         Essential: true
+         Cpu: !Ref AppCpu
+         Memory: !Ref AppMemory

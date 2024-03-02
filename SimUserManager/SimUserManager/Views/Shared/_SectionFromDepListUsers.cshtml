@@ -1,0 +1,44 @@
+@model SimUserManager.Models.Users
+
+<div class="form-group">
+    <label class="control-label">課班</label>
+    @*data-bindのオプションはknockout.jsのもの。knockout.jsのマニュアルを参照。*@
+    <select for="Section"
+            data-bind="options: depgrplist, optionsText: 'text', optionsValue: 'text', value: depnameval,
+                                    optionsCaption: '課班名を選択'"
+            class="form-control">課班>
+    </select>
+    <script type="text/javascript" src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script type="text/javascript" src="~/lib/knockout/knockout-latest.js"></script>
+    <script type="text/javascript">
+    $(function() {
+            var createDepGrpnameViewModel = {
+                depgrplist: ko.observableArray([]),
+                depnameval: ko.observable()
+            };
+            ko.applyBindings(createDepGrpnameViewModel);
+
+            $("#DepartmentNo").on('change',function(){
+                var depname = $(this).val()
+                if(!depname) {
+                    createDepGrpnameViewModel.depname([]);
+                }
+
+                $.ajax({
+                     type: 'GET',
+                     url: '/Users/GetDepGroupname',
+                     data: {depname: depname},
+                     dataType: 'json',
+                     cache: false,
+                     success: function(data){
+                         createDepGrpnameViewModel.depgrplist(data);
+                         createDepGrpnameViewModel.depnameval('');
+                     },
+                     error: function (error) {
+                             alert(error.statusText + " - 課班名取得に失敗しました");
+                     }
+               });
+           });
+  });
+  </script>
+</div>

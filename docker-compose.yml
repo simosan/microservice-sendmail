@@ -1,0 +1,39 @@
+version: '2'
+services:
+  simusermanager:
+    image: simusermanager/simusermanager:1.0
+    ports:
+      - "58080:58080"
+    container_name: simusermanager.sim-internal
+    environment:
+      - TZ=Asia/Tokyo
+  sesmailclient:
+    image: sesmailclient/sesmailclient:1.0
+    ports:
+      - "3005:3005" 
+    environment:
+      - WHITELISTURL=http://applicationproc.sim-internal:3998
+      - TZ=Asia/Tokyo
+    container_name: sesmailclient.sim-internal
+  supervisorcheck:
+    image: supervisorcheck/supervisorcheck:1.0
+    ports:
+      - "3999:3999"
+    environment:
+      - CORS_HOST=https://appsendmail.sim-internal:53000
+      - TZ=Asia/Tokyo
+    container_name: supervisorcheck.sim-internal
+  applicationproc:
+    image: applicationproc/applicationproc:1.0
+    ports:
+      - "3998:3998"
+    container_name: applicationproc.sim-internal
+    environment:
+      - SENDMAILURL=http://sesmailclient.sim-internal:3005/sendmail
+      - CORS_HOST=https://appsendmail.sim-internal:53000
+      - TZ=Asia/Tokyo
+  approvalsendmail:
+    image: approvalsendmail/approvalsendmail:1.0
+    ports:
+      - "53000:53000"
+    container_name: appsendmail.sim-internal

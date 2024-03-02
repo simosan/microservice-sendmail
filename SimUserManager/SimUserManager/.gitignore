@@ -1,0 +1,10 @@
+.DS_Store
+.vs/
+.vscod/
+bin/
+obj/
+tmp/
+work/
+appsettings*.json
+*.csproj
+*.slnsx

@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+ ProjectName:
+   Type: String
+   Default: 'MKECS-SIMCLUSTER'
+ VpcId:
+   Type: String
+   Default: 
+ OutboundIpRange:
+   Type: String
+   Default: '0.0.0.0/0'
+   # Set up appropriately. In this case, all communication is allowed.
+ InboundIpRange:
+   Type: String
+   Default: '0.0.0.0/0'
+   # Set up appropriately. In this case, all communication is allowed.
+ Namespace:
+   Type: String
+   Default: 'sim-internal'
+  # Namespaces for Service Discovery(CloudMap)
+ ProtectedSubnets1:
+   Type: String
+   Default: 
+ ProtectedSubnets2:
+   Type: String
+   Default: 
+ PublicSubnet:
+   Type: String
+   Default: 
+ EnableNatGatewayParam:
+   Description: Enable NAT Gateway.
+   Type: String
+   Default: true
+   AllowedValues: [true, false]
+ NatgwRouteProxy:
+   Type: String
+   Default: 
+
+Conditions:
+   EnableNatGateway: !Equals [ !Ref EnableNatGatewayParam, true ]
+
+Resources:
+ # -------------------------------------
+ # 必要なVPC Endpoint作成
+ # -------------------------------------
+ XRayEndpoint:
+   Type: AWS::EC2::VPCEndpoint
+   Properties:
+     PrivateDnsEnabled: true
+     SecurityGroupIds:
+       - !Ref EndpointSecurityGroup
+     ServiceName: !Sub "com.amazonaws.${AWS::Region}.xray"
+     SubnetIds:
+       - !Ref ProtectedSubnets1
+       - !Ref ProtectedSubnets2
+     VpcEndpointType: Interface
+     VpcId: !Ref VpcId
+
+ EcrDockerEndpoint:
+   Type: AWS::EC2::VPCEndpoint
+   Properties:
+     PrivateDnsEnabled: true
+     SecurityGroupIds:
+       - !Ref EndpointSecurityGroup
+     ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
+     SubnetIds:
+       - !Ref ProtectedSubnets1
+       - !Ref ProtectedSubnets2     
+     VpcEndpointType: Interface
+     VpcId: !Ref VpcId
+
+ EcrApiEndpoint:
+   Type: AWS::EC2::VPCEndpoint
+   Properties:
+     PrivateDnsEnabled: true
+     SecurityGroupIds:
+       - !Ref EndpointSecurityGroup
+     ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
+     SubnetIds:
+       - !Ref ProtectedSubnets1
+       - !Ref ProtectedSubnets2   
+     VpcEndpointType: Interface
+     VpcId: !Ref VpcId
+
+ EcrLogsEndpoint:
+   Type: AWS::EC2::VPCEndpoint
+   Properties:
+     PrivateDnsEnabled: true
+     SecurityGroupIds:
+       - !Ref EndpointSecurityGroup
+     ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+     SubnetIds:
+       - !Ref ProtectedSubnets1
+       - !Ref ProtectedSubnets2 
+     VpcEndpointType: Interface
+     VpcId: !Ref VpcId
+
+ EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-EndpointSecurityGroup"
+      GroupDescription: Allow HTTPS from ContainerSecurityGroup.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref SecurityGroup 
+
+ # -------------------------------------
+ # Fargateですべての通信を許可するセキュリティグループ（CLUSTER内共通)
+ # -------------------------------------
+ SecurityGroup:
+   Type: AWS::EC2::SecurityGroup
+   Properties:
+     Tags:
+       - Key: Name
+         Value: !Sub "${ProjectName}-fargate"
+     GroupName: !Sub "${ProjectName}-fargate" 
+     GroupDescription: Security group for the SIMCLUSTER-FARGATE
+     VpcId: !Ref VpcId
+
+ SecurityGroupIngress:
+   Type: AWS::EC2::SecurityGroupIngress
+   Properties:
+     GroupId: !Ref SecurityGroup
+     IpProtocol: -1                     #すべてのプロトコルを許可
+     CidrIp: !Ref InboundIpRange
+
+ SecurityGroupEgress:
+   Type: AWS::EC2::SecurityGroupEgress
+   Properties:
+     GroupId: !Ref SecurityGroup
+     IpProtocol: -1                     #すべてのプロトコルを許可
+     CidrIp: !Ref OutboundIpRange
+
+ LogGroup:
+   Type: AWS::Logs::LogGroup
+   Properties:
+     LogGroupName: !Sub /ecs/${ProjectName}
+
+ PrivateDnsNamespace:
+   Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+   Properties:
+     Vpc: !Ref VpcId
+     Name: !Ref Namespace
+
+ Cluster:
+   Type: AWS::ECS::Cluster
+   Properties:
+     ClusterName: !Ref ProjectName
+
+ # -------------------------------------
+ # NATGateway作成（SES用）
+ # -------------------------------------
+
+
+ NatGateway:
+   Type: AWS::EC2::NatGateway
+   Condition: EnableNatGateway
+   Properties:
+     AllocationId: !GetAtt NatGatewayEIP.AllocationId
+     SubnetId: !Ref PublicSubnet
+     Tags:
+       - Key: Name
+         Value: !Sub ${ProjectName}-ngw
+
+ NatGatewayEIP:
+   Type: AWS::EC2::EIP
+   Condition: EnableNatGateway
+   Properties:
+     Domain: vpc
+
+ NatgwRoute:
+   Type: AWS::EC2::Route
+   Condition: EnableNatGateway
+   Properties:
+     RouteTableId: !Ref NatgwRouteProxy
+     DestinationCidrBlock: 0.0.0.0/0
+     NatGatewayId: !Ref NatGateway
+ 
+ # -------------------------------------
+ # タスク起動時に必要なロールを定義
+ # -------------------------------------
+ EcsTaskExecutionRole:
+   Type: AWS::IAM::Role
+   Properties:
+     AssumeRolePolicyDocument:
+       Version: 2012-10-17
+       Statement:
+         - Effect: Allow
+           Principal:
+             Service:
+               - ecs-tasks.amazonaws.com
+           Action:
+             - sts:AssumeRole
+     ManagedPolicyArns:
+       - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+       - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+       - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+       - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+     Policies:
+       - PolicyName: !Sub ${ProjectName}-EcsTaskExecutionRolePolicy
+         PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - secretsmanager:GetSecretValue
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - "*"
+     RoleName: !Sub ${ProjectName}-ecsTaskExecutionRole
+
+Outputs:
+  VPC:
+    Value: !Ref VpcId
+    Export:
+      Name: !Sub VPC
+  SecurityGroup:
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub "${ProjectName}-SecurityGroup"
+  LogGroup:
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub "${ProjectName}-LogGroup"
+  PrivateDnsNamespace:
+    Value: !Ref PrivateDnsNamespace
+    Export:
+      Name: !Sub "${ProjectName}-PrivateDnsNamespace"
+  Cluster:
+    Value: !Ref Cluster
+    Export:
+      Name: !Ref ProjectName
+  EcsTaskExecutionRole:
+    Value: !GetAtt EcsTaskExecutionRole.Arn
+    Export:
+      Name: !Sub EcsTaskExecutionRole
+  ProtectedSubnet1:
+    Value: !Ref ProtectedSubnets1
+    Export:
+      Name: !Sub "${ProjectName}-ProtectedSubnets1"
+  ProtectedSubnet2:
+    Value: !Ref ProtectedSubnets2
+    Export:
+      Name: !Sub "${ProjectName}-ProtectedSubnets2"
