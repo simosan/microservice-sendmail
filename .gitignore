@@ -3,3 +3,5 @@ removecontainer.sh
 .DS_Store
 cert_tmp/
 old/
+docker-compose.yml.20240218
+recovery.sh
